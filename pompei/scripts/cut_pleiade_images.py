@@ -96,6 +96,8 @@ for image in images_Pleiades:
 
 #On construit le fichier hdr du MNS
 chemin_mns = os.path.join(args.metadata, "mns_temp", "MNS.tif")
+if not os.path.exists(chemin_mns):   # HistCat: honour pre-placed MDS05
+    chemin_mns = os.path.join(args.metadata, "mns", "MNS.tif")
                                 
 
 inputds = gdal.Open(chemin_mns)
