@@ -93,6 +93,8 @@ if args.ortho == "storeref" and EPSG==2154:
         os.remove(os.path.join("metadata", "mnt", tile))
     commande = "gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"), os.path.join("metadata", "mnt", "*.tif"))
     os.system(commande)
+elif os.path.exists(os.path.join("metadata", "mnt", "mnt.vrt")):
+    logger.info("MNS preloaded: metadata/mnt/mnt.vrt exists, skip download")
 else:
     download_data(bbox, "MNT", "metadata", EPSG)
     images = [i for i in os.listdir(os.path.join("metadata", "mnt_temp")) if i[-4:]==".tif"]
