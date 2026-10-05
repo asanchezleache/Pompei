@@ -37,6 +37,9 @@ dict_EPSG = {
     32740:{"auth":32740, "epsg_geoc": 4970, "epsg_geog": 7036},
     32742:{"auth":32742, "epsg_geoc": "IGNF:RGTAAF07", "epsg_geog": 7088},#à vérifier
     32743:{"auth":32743, "epsg_geoc": "IGNF:RGTAAF07", "epsg_geog": 7088},#à vérifier
+    25830:{"auth":25830, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM30N (Spain)
+    25829:{"auth":25829, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM29N (Spain)
+    25831:{"auth":25831, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM31N (Spain)
     2154:{"auth": "IGNF:RGF93LAMB93", "epsg_geoc": 4374, "epsg_geog": 7084}    
 }
 
@@ -75,7 +78,7 @@ class Shot:
 
         crs_to_crs_geoc = pyproj.Transformer.from_crs(crs, crs_geoc)
         crs_geoc_to_crs = pyproj.Transformer.from_crs(crs_geoc, crs)
-        crs_to_crs_geog = pyproj.Transformer.from_crs(crs, crs_geog)
+        crs_to_crs_geog = pyproj.Transformer.from_crs(crs, crs_geog, always_xy=True)  # HistCat: lon-lat order
         return {
             "crs_to_crs_geoc":crs_to_crs_geoc,
             "crs_geoc_to_crs":crs_geoc_to_crs,
