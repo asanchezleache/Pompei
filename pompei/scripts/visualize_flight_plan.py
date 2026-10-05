@@ -44,8 +44,12 @@ chemin_metadata = os.path.join(chemin_chantier, "metadata")
 
 
 def findEPSG(root):
-    projection = root.find(".//projection").text.strip()
-    dictionnaire = {
+    proj_node = root.find(".//projection")
+    projection = proj_node.text.strip() if proj_node is not None else ""
+    if projection.upper().startswith("EPSG:"):   # HistCat patch: native EPSG
+        EPSG = int(projection.split(":")[1])
+    else:
+        dictionnaire = {
         "UTM_WGS84_f01sud":32701,
         "UTM_WGS84_f05sud":32705,
         "UTM_WGS84_f06sud":32706,
@@ -71,7 +75,8 @@ def findEPSG(root):
 
     os.makedirs(chemin_metadata, exist_ok=True)
 
-    EPSG = dictionnaire[projection]
+    if not projection.upper().startswith("EPSG:"):   # HistCat patch guard
+        EPSG = dictionnaire[projection]
     with open(os.path.join(chemin_metadata, "EPSG.txt"), "w") as f:
         f.write(str(EPSG))
 
@@ -146,7 +151,11 @@ def remove_images_without_metadata(liste_images, images):
             if image_metadata["nom"]== image.strip():
                 booleen = True
         if not booleen:
-            shutil.move(os.path.join(chemin_chantier, image+".jp2"), os.path.join(path_without_metadata, image+".jp2"))
+            for ext in (".jp2", ".tif"):   # HistCat patch: .tif frames too
+                src = os.path.join(chemin_chantier, image + ext)
+                if os.path.exists(src):
+                    shutil.move(src, os.path.join(path_without_metadata, image + ext))
+                    break
             logger.warning("L'image {} n'a pas de métadonnées. Elle est retirée des données.".format(image))
 
 def save_shapefile(liste_images, images, path_footprint_chantier, EPSG, all):
