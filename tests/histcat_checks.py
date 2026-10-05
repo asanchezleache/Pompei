@@ -102,6 +102,9 @@ def test_static_markers():
     mos = src("mosaiquage.py")
     check("mosaiquage: collinear + metadata EPSG",
           "hasattr(lines" in mos and "getEPSG(metadata)" in mos)
+    check("spain: module present", os.path.exists(os.path.join(SCRIPTS, "download_ortho_MNS_spain.py")))
+    check("spain: wired in download_ortho_MNS.sh", '"spain"' in src("download_ortho_MNS.sh"))
+    check("spain: wired in download_mnt.py", '"spain"' in src("download_mnt.py"))
     with open(os.path.join(HERE, "..", "dockerfile"), encoding="utf-8",
               errors="ignore") as f:
         df = f.read()
@@ -110,32 +113,39 @@ def test_static_markers():
 
 
 def test_network():
-    """L1 service probes over the real pilot bbox (slow, opt-in)."""
-    import numpy as np, rasterio, warnings
-    import requests
+    """L1 service probes THROUGH THE SHIPPING MODULE (opt-in)."""
+    import numpy as np, rasterio, warnings, tempfile, shutil
     warnings.filterwarnings("ignore")
-    emin, nmin, te, tn = 428776, 4477003, 430776, 4479003
-    wcs = (f"https://servicios.idee.es/wcs-inspire/mdt?service=WCS&version=2.0.1"
-           f"&request=GetCoverage&coverageId=Elevacion25830_5"
-           f"&subset=Long({emin},{te})&subset=Lat({nmin},{tn})"
-           f"&format=image/tiff&responses=content")
-    wms = (f"https://www.ign.es/wms-inspire/pnoa-ma?service=WMS&version=1.3.0"
-           f"&request=GetMap&layers=OI.OrthoimageCoverage&styles=&crs=EPSG:25830"
-           f"&bbox={emin},{nmin},{te},{tn}&width=1000&height=1000&format=image/tiff")
-    for label, url, expect in [("WCS", wcs, "int16"), ("WMS", wms, "uint8")]:
-        f = f"/tmp/histcat_pf_{label}.tif"
-        ok = False
-        try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=120)
-            with open(f, "wb") as fh:
-                fh.write(r.content)
-            with rasterio.open(f) as d:
+    sys.path.insert(0, SCRIPTS)
+    import download_ortho_MNS_spain as sp
+    tmp = tempfile.mkdtemp()
+    md = os.path.join(tmp, "metadata"); os.makedirs(md)
+    with open(os.path.join(md, "EPSG.txt"), "w") as f:
+        f.write("25830\n")
+    bbox = [450000, 4477000, 450500, 4477500]      # 0.5 km box, few tiles
+    try:
+        sp.fetch_ortho(bbox, md, margin=200.0)
+        sp.fetch_terrain(bbox, md, subdir="mns", prefix="MNS", margin=500.0)
+        import glob
+        o = glob.glob(os.path.join(md, "ortho", "ORTHO_dalle_*.tif"))
+        t = glob.glob(os.path.join(md, "mns", "MNS_dalle_*.tif"))
+        ok_o = ok_t = False
+        if o:
+            with rasterio.open(o[0]) as d:
+                a = d.read()
+                ok_o = (d.crs.to_epsg() == 25830 and d.count == 3
+                        and d.dtypes[0] == "uint8" and float(a.std()) > 5)
+        if t:
+            with rasterio.open(t[0]) as d:
                 a = d.read(1)
-                ok = (d.crs.to_epsg() == 25830 and d.dtypes[0] == expect
-                      and (a > -30000).mean() > 0.9)
-        except Exception:
-            pass
-        check(f"network: {label} service live + content", ok)
+                ok_t = (d.crs.to_epsg() == 25830 and d.dtypes[0] == "int16"
+                        and 300 < float(np.median(a[a > -30000])) < 1500)
+        check("network: module fetch_ortho live + content", ok_o, f"{len(o)} tiles")
+        check("network: module fetch_terrain live + content", ok_t, f"{len(t)} tiles")
+    except Exception as e:
+        check("network: spain module fetch", False, str(e)[:120])
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main():

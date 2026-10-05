@@ -85,4 +85,7 @@ RUN mamba env create -f environment.yml
 
 RUN conda init bash || true
 
+# HistCat: L2 preflight battery — a regressed patch fails the BUILD, not a 6-hour run
+RUN bash -lc "source $HOME/conda/etc/profile.d/conda.sh && conda activate pompei && python $HOME/pompei/tests/histcat_checks.py"
+
 CMD echo "Pompei"
