@@ -63,9 +63,12 @@ def voronoi(shots:List[Shot], emprise:Polygon)->List[LineString]:
     # On découpe le résultat selon l'emprise du chantier (extend_to ne semble pas fonctionner...)
     lines = intersection(lines, emprise)
 
-    gpd.GeoDataFrame({"geometry":lines.geoms}).set_crs(epsg=2154).to_file("voronoi.gpkg")
+    # HistCat fix: single LineString when camera centres are collinear
+    # (a straight flight strip); and EPSG from metadata, not hardcoded 2154.
+    geoms = list(lines.geoms) if hasattr(lines, "geoms") else [lines]
+    gpd.GeoDataFrame({"geometry":geoms}).set_crs(epsg=int(getEPSG(metadata))).to_file("voronoi.gpkg")
 
-    return lines.geoms
+    return geoms
 
 
 
