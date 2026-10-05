@@ -203,7 +203,7 @@ def case_0_fiduciaux(cliches, remove_artefacts):
         f.write("python ${scripts_dir}/maj_calibNum.py "+f"--identifiant 0 --ta {TA_path} >> logfile \n\n")
         f.write("#Saisie du masque pour supprimer les contours \n")
         f.write("echo \"Saisie du masque pour supprimer les contours\" \n")
-        f.write("mm3d SaisieMasq OIS-Reech_{}.tif Name=filtre0.tif Gama=2 >> logfile\n".format(name_first_image))
+        f.write("python ${scripts_dir}/auto_mask_pompei.py filtre0.tif >> logfile\n")
         if remove_artefacts:
             f.write("echo \"Saisie du masque pour supprimer les contours et les artefacts\"\n ")
             f.write("mm3d SaisieMasq OIS-Reech_{}.tif Name=filtre_artefacts.tif Gama=2 >> logfile\n".format(name_first_image))
@@ -217,7 +217,7 @@ def case_0_fiduciaux(cliches, remove_artefacts):
         f.write("mm3d OriConvert OriTxtInFile SommetsNav.csv Nav NameCple=CouplesTA.xml >> logfile \n\n")
         f.write("# Recherche des points homologues \n")
         f.write("echo \"Tapioca\" \n")
-        f.write("mm3d Tapioca File CouplesTA.xml 5000 | tee reports/rapport_Tapioca.txt >> logfile \n\n")
+        f.write("mm3d Tapioca File CouplesTA.xml 5000 > reports/rapport_Tapioca.txt 2>&1 \n\n")
         f.write("python ${scripts_dir}/analyze_Tapioca.py --input_report=reports/rapport_Tapioca.txt --output_rapport=reports/resultat_analyse_Tapioca.txt \n\n")
 
 
@@ -298,7 +298,7 @@ def case_n_fiduciaux(remove_artefacts, sensors, targets, nb_fiducial_marks, appl
         f.write("mm3d OriConvert OriTxtInFile SommetsNav.csv Nav NameCple=CouplesTA.xml >> logfile \n\n")
         f.write("# Recherche des points homologues \n")
         f.write("echo \"Tapioca\" \n")
-        f.write("mm3d Tapioca File CouplesTA.xml 5000 5000 | tee reports/rapport_Tapioca.txt >> logfile \n\n")
+        f.write("mm3d Tapioca File CouplesTA.xml 5000 5000 > reports/rapport_Tapioca.txt 2>&1 \n\n")
         f.write("python ${scripts_dir}/analyze_Tapioca.py --input_report=reports/rapport_Tapioca.txt --output_rapport=reports/resultat_analyse_Tapioca.txt \n\n")
 
 
