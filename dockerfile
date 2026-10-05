@@ -83,6 +83,6 @@ WORKDIR $HOME/pompei/pompei
 #Activation de l'environnement Conda
 RUN mamba env create -f environment.yml
 
-RUN mamba init bash
+RUN conda init bash || true
 
 CMD echo "Pompei"
