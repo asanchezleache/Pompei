@@ -40,6 +40,9 @@ if test ${ortho} = "dalles"; then
       touch metadata/mns/PRELOADED_MNS
     fi
     python ${scripts_dir}/cut_pleiade_images.py --input "metadata/ortho_temp" --output "metadata/ortho" --metadata "metadata"
+elif test ${ortho} = "spain"; then
+    # HistCat: IGN-E WMS ortho + WCS terrain, vanilla extent logic
+    python ${scripts_dir}/download_ortho_MNS_spain.py --metadata metadata
 elif test ${ortho} = "histo"; then
     #On télécharge les chantiers les plus anciens. Dans ce cas, on télécharge les dalles à la résolution du chantier
     python ${scripts_dir}/download_ortho_MNS_geoserver.py --metadata "metadata"

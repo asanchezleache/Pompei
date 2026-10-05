@@ -21,7 +21,7 @@ nb_fiducial_marks=$2 #int
 targets=$3 # [0, 1]
 Kugelhupf_apply_threshold=$4 #[0, 1]
 remove_artefacts=$5 #[0, 1]
-ortho=$6 # storeref, wms, histo, dalles
+ortho=$6 # storeref, wms, histo, dalles, spain
 algo=$7 # a pour Aubry, srtm pour SRTM
 filter_GCP=$8 #[0, 1]
 create_ortho_mns=$9 #[0, 1]
@@ -37,7 +37,7 @@ if test "$#" = 0; then
     echo "targets : [0, 1]"
     echo "Kugelhupf_apply_threshold : [0, 1]"
     echo "remove_artefacts : [0, 1]"
-    echo "ortho : [storeref, wms, histo, dalles]"
+    echo "ortho : [storeref, wms, histo, dalles, spain]"
     echo "algo : [a, s, srtm] : a pour Aubry, srtm pour SRTM"
     echo "filter_GCP : [0, 1]"
     echo "create_ortho_mns : [0, 1]"

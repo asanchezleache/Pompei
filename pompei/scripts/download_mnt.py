@@ -93,6 +93,13 @@ if args.ortho == "storeref" and EPSG==2154:
         os.remove(os.path.join("metadata", "mnt", tile))
     commande = "gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"), os.path.join("metadata", "mnt", "*.tif"))
     os.system(commande)
+elif args.ortho == "spain":
+    # HistCat: IGN-E WCS terrain, 2 km margin over the chantier bbox
+    from download_ortho_MNS_spain import fetch_terrain
+    os.makedirs(os.path.join("metadata", "mnt"), exist_ok=True)
+    fetch_terrain(bbox, "metadata", subdir="mnt", prefix="MNT", margin=2000.0)
+    os.system("gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"),
+                                          os.path.join("metadata", "mnt", "*.tif")))
 elif os.path.exists(os.path.join("metadata", "mnt", "mnt.vrt")):
     logger.info("MNS preloaded: metadata/mnt/mnt.vrt exists, skip download")
 else:
