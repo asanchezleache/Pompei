@@ -42,6 +42,7 @@ def find_problem(chemin_rapport, chemin_scripts):
     dictionnaire = {}
 
     line_worst = None
+    line_residual = None   # HistCat fix: was unbound when Tapas crashes early
 
     with open(chemin_rapport, "r") as f:
         fatal_error = False
