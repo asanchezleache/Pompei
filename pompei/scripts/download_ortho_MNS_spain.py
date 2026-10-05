@@ -122,6 +122,15 @@ if __name__ == "__main__":
     parser.add_argument("--metadata", default="metadata")
     args = parser.parse_args()
     bbox = [float(l) for l in open(os.path.join(args.metadata, "bbox.txt"))]
+    # spain mode owns its directories: drop any pre-placed leftovers from
+    # other modes so the shared-tail vrt globs (MNS*tif, mnt/*.tif) see only
+    # streamed tiles
+    for stale_dir in ("mns", "mnt"):
+        d = os.path.join(args.metadata, stale_dir)
+        if os.path.isdir(d):
+            import glob as _g
+            for f in _g.glob(os.path.join(d, "*.tif")) + _g.glob(os.path.join(d, "*.vrt")):
+                os.remove(f)
     fetch_ortho(bbox, args.metadata)
     fetch_terrain(bbox, args.metadata, subdir="mns", prefix="MNS")
     # the shared tail skips the French SRTM border-fill when this marker exists

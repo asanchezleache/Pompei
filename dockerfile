@@ -74,14 +74,17 @@ RUN  cmake ../
 RUN make install -j${cpu}
 ENV PATH=$HOME/micmac/bin/:$PATH
 
+# HistCat layer-order fix: the conda env depends ONLY on environment.yml, so
+# copy that first and create the env before copying the (frequently edited)
+# scripts — code changes then invalidate only the cheap COPY layer, not the
+# ~20-minute env creation, on every rebuild.
+COPY --chown=pompei pompei/environment.yml $HOME/environment.yml
+RUN mamba env create -f $HOME/environment.yml
+
 #Copie du code Pompei dans l'image
 WORKDIR $HOME/pompei
 COPY --chown=pompei . .
-
 WORKDIR $HOME/pompei/pompei
-
-#Activation de l'environnement Conda
-RUN mamba env create -f environment.yml
 
 RUN conda init bash || true
 

@@ -94,9 +94,14 @@ if args.ortho == "storeref" and EPSG==2154:
     commande = "gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"), os.path.join("metadata", "mnt", "*.tif"))
     os.system(commande)
 elif args.ortho == "spain":
-    # HistCat: IGN-E WCS terrain, 2 km margin over the chantier bbox
+    # HistCat: IGN-E WCS terrain, 2 km margin over the chantier bbox.
+    # mnt/ is owned by spain mode: clear leftovers from other modes first.
     from download_ortho_MNS_spain import fetch_terrain
+    import glob as _g
     os.makedirs(os.path.join("metadata", "mnt"), exist_ok=True)
+    for f in (_g.glob(os.path.join("metadata", "mnt", "*.tif"))
+              + _g.glob(os.path.join("metadata", "mnt", "*.vrt"))):
+        os.remove(f)
     fetch_terrain(bbox, "metadata", subdir="mnt", prefix="MNT", margin=2000.0)
     os.system("gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"),
                                           os.path.join("metadata", "mnt", "*.tif")))
