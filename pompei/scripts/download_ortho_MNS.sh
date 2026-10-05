@@ -32,9 +32,13 @@ if test ${ortho} = "dalles"; then
     #On télécharge le SRTM correspondant à la zone et on découpe les images en tuiles de 2000 pixels de côté
     mkdir -p metadata/mns_temp
     mkdir -p metadata/mns
-    python ${scripts_dir}/download_SRTM.py --metadata metadata --output metadata/mns_temp/MNS_temp.tif
-    gdalwarp -t_srs EPSG:${EPSG}   -overwrite metadata/mns_temp/MNS_temp.tif metadata/mns_temp/MNS.tif
-    rm metadata/mns_temp/MNS_temp.tif
+    if [ ! -f metadata/mns/MNS.tif ]; then
+      python ${scripts_dir}/download_SRTM.py --metadata metadata --output metadata/mns_temp/MNS_temp.tif
+      gdalwarp -t_srs EPSG:${EPSG} -overwrite metadata/mns_temp/MNS_temp.tif metadata/mns/MNS.tif
+      rm -f metadata/mns_temp/MNS_temp.tif
+    else
+      touch metadata/mns/PRELOADED_MNS
+    fi
     python ${scripts_dir}/cut_pleiade_images.py --input "metadata/ortho_temp" --output "metadata/ortho" --metadata "metadata"
 elif test ${ortho} = "histo"; then
     #On télécharge les chantiers les plus anciens. Dans ce cas, on télécharge les dalles à la résolution du chantier
@@ -75,11 +79,16 @@ cd ../..
 # La meilleure manière est donc de compléter ce MNS avec le MNT du SRTM. 
 
 # Récupération du SRTM sur l'emprise du MNS récupéré
+if [ -f metadata/mns/PRELOADED_MNS ]; then
+    # HistCat: full-coverage pre-placed MDS05, no border gaps to fill
+    cp metadata/mns/MNS_ssech4_temp.tif metadata/mns/MNS_ssech4.tif
+else
 python ${scripts_dir}/download_SRTM.py --metadata metadata --output metadata/mns/MNS_SRTM.tif
 # On le convertit dans l'EPSG du chantier et à une résolution de 4 mètres 
 gdalwarp -t_srs EPSG:${EPSG} -tr 4 4  -overwrite metadata/mns/MNS_SRTM.tif metadata/mns/MNS_SRTM_2154.tif
 # On fusionne le MNS précis et celui issu du SRTM en gardant en priorité le MNS précis
 gdal_calc.py -a metadata/mns/MNS_SRTM_2154.tif -b metadata/mns/MNS_ssech4_temp.tif --overwrite --outfile metadata/mns/MNS_ssech4.tif --calc="b*(b>0)+a*(b==0)" --extent union
+fi
 # On crée le fichier xml contenant les informations du MNS nécessaires à Micmac
 python ${scripts_dir}/create_xml_micmac.py --tif_image metadata/mns/MNS_ssech4.tif --xml_file metadata/mns/MNS_ssech4.xml
 cd metadata/ortho
