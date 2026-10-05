@@ -11,6 +11,12 @@
 #of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 #You should have received a copy of the GNU General Public License along with Pompei. If not, see <https://www.gnu.org/licenses/>.
 set -e
+# HistCat guard: mm3d returns 0 even when its internal make fails
+if [ -z "$(ls -A Homol 2>/dev/null)" ]; then
+    echo "FATAL: Homol empty - Tapioca produced nothing (OOM?)" >> logfile
+    echo "FATAL: Homol empty - Tapioca produced nothing (OOM?)"
+    exit 1
+fi
 remove_artefacts=$1
 scripts_dir=$2 
 
