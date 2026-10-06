@@ -101,12 +101,23 @@ else
     echo "A partir de maintenant, vous pouvez utiliser pompei_before_aero.sh"
     sh ${scripts_dir}/aero.sh ${scripts_dir} ${filter_GCP} ${algo} ${delete}
 
+    # HistCat: two alternative final-ortho drape surfaces, chosen by the
+    # create_ortho_mns / create_ortho_mnt flags (our recipe: 0 1).
+    # MNS path drapes onto Malt's reconstructed 1985 surface
+    # (MEC-Malt-Final/MNS_Final.vrt) -- physically true for rooftops, but
+    # inconsistent with the ground-draped 1956/PNOA epochs we compare
+    # against, and it inherits reconstruction holes. We keep it OFF.
     if test ${create_ortho_mns} = "1"; then
 
         sh ${scripts_dir}/create_ortho_mns.sh ${scripts_dir} ${CPU} ${TA} ${delete}
     
     fi
 
+    # MNT path drapes onto today's bare ground (metadata/mnt/mnt.vrt), the
+    # same convention as the 1956 baseline and PNOA orthos -- this is the
+    # product HistCat uses. Its terrain must cover the corner rays projected
+    # onto the ground (~8 km past the footprints measured on Madrid), not
+    # just the image footprints; see download_mnt.py spain branch.
     if test ${create_ortho_mnt} = "1"; then
 
         sh ${scripts_dir}/create_ortho.sh ${scripts_dir} ${TA} ${ortho} ${CPU} ${delete}
