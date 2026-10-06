@@ -21,6 +21,15 @@ terrain raster diverge to NaN (the failure class this mode removes).
 Tiles are named ORTHO_dalle_i_j.tif / MNS_dalle_i_j.tif to match the vrt
 patterns of the shared tail of download_ortho_MNS.sh. Resumable: existing
 non-empty tiles are skipped.
+
+PRODUCTION PATH (HistCat, 2026-10-06): chantiers ship with single reference
+rasters cut at staging from national master folders — metadata/ortho/
+ORTHO.tif, metadata/mns/MNS.tif, metadata/mnt/MNT.tif (see download_mnt.py
+and 00_project/01_documentation/pompei_adaptations.md). When those files are
+present this module keeps them, clears stale tiles around them and skips the
+stream entirely; the IGN-E fetch below is only the fallback for areas our
+masters do not cover. Pompei proper never sees the difference: it consumes
+the shared-tail VRTs either way.
 """
 import os
 import argparse
@@ -58,6 +67,23 @@ def _get(url, params, dest):
     return False
 
 
+def _supplied(dest):
+    """HistCat: a reference raster shipped with the chantier (staging
+    `prefetch` cuts ORTHO.tif / MNS.tif / MNT.tif from national masters).
+    Pompei is blind to its origin: if the file is in place the stream is
+    skipped and the shared-tail VRT globs see only the supplied file."""
+    return os.path.exists(dest) and os.path.getsize(dest) > 0
+
+
+def _clear_except(directory, keep):
+    """Remove stale tiles/VRTs from a mode directory, keeping `keep` names."""
+    import glob as _g
+    for f in _g.glob(os.path.join(directory, "*.tif")) + \
+              _g.glob(os.path.join(directory, "*.vrt")):
+        if os.path.basename(f) not in keep:
+            os.remove(f)
+
+
 def _tile_edges(e_min, e_max, n_min, n_max):
     """1 km tile edges + endpoints, same construction as the vanilla loop."""
     es = list(range(int(e_min), int(e_max), int(TILE_M))) + [e_max]
@@ -66,10 +92,15 @@ def _tile_edges(e_min, e_max, n_min, n_max):
 
 
 def fetch_ortho(bbox, metadata="metadata", margin=500.0):
+    out = os.path.join(metadata, "ortho")
+    single = os.path.join(out, "ORTHO.tif")
+    if _supplied(single):
+        _clear_except(out, {"ORTHO.tif"})
+        print("ORTHO: supplied with chantier, stream skipped")
+        return out
     epsg = int(open(os.path.join(metadata, "EPSG.txt")).read())
     emin, nmin, emax, nmax = bbox
     emin -= margin; nmin -= margin; emax += margin; nmax += margin
-    out = os.path.join(metadata, "ortho")
     os.makedirs(out, exist_ok=True)
     es, ns = _tile_edges(emin, emax, nmin, nmax)
     failed = 0
@@ -92,11 +123,16 @@ def fetch_ortho(bbox, metadata="metadata", margin=500.0):
 
 def fetch_terrain(bbox, metadata="metadata", subdir="mns", prefix="MNS",
                   margin=2000.0, epsg=None):
+    out = os.path.join(metadata, subdir)
+    single = os.path.join(out, f"{prefix}.tif")
+    if _supplied(single):
+        _clear_except(out, {f"{prefix}.tif"})
+        print(f"{prefix}: supplied with chantier, stream skipped")
+        return out
     if epsg is None:
         epsg = int(open(os.path.join(metadata, "EPSG.txt")).read())
     emin, nmin, emax, nmax = bbox
     emin -= margin; nmin -= margin; emax += margin; nmax += margin
-    out = os.path.join(metadata, subdir)
     os.makedirs(out, exist_ok=True)
     coverage = TERRAIN_COVERAGE.format(epsg=epsg)
     es, ns = _tile_edges(emin, emax, nmin, nmax)
@@ -122,15 +158,15 @@ if __name__ == "__main__":
     parser.add_argument("--metadata", default="metadata")
     args = parser.parse_args()
     bbox = [float(l) for l in open(os.path.join(args.metadata, "bbox.txt"))]
-    # spain mode owns its directories: drop any pre-placed leftovers from
-    # other modes so the shared-tail vrt globs (MNS*tif, mnt/*.tif) see only
-    # streamed tiles
-    for stale_dir in ("mns", "mnt"):
+    # spain mode owns its directories: drop pre-placed leftovers from other
+    # modes so the shared-tail vrt globs (MNS*tif, mnt/*.tif) see only this
+    # mode's output — but NEVER touch a file supplied with the chantier
+    # (staging `prefetch`): that is the production path, the stream is the
+    # fallback for areas our masters do not cover.
+    for stale_dir, keep in (("mns", "MNS.tif"), ("mnt", "MNT.tif")):
         d = os.path.join(args.metadata, stale_dir)
-        if os.path.isdir(d):
-            import glob as _g
-            for f in _g.glob(os.path.join(d, "*.tif")) + _g.glob(os.path.join(d, "*.vrt")):
-                os.remove(f)
+        if os.path.isdir(d) and not _supplied(os.path.join(d, keep)):
+            _clear_except(d, set())
     fetch_ortho(bbox, args.metadata)
     fetch_terrain(bbox, args.metadata, subdir="mns", prefix="MNS")
     # the shared tail skips the French SRTM border-fill when this marker exists

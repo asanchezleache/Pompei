@@ -148,12 +148,47 @@ def test_network():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_supplied(tmp):
+    """Production path: chantiers ship with metadata/{ortho,mns,mnt}/*.tif
+    cut at staging. The spain module must keep them, skip the stream, and
+    clear stale tiles around them. Run with network env poisoned so any
+    accidental HTTP call fails loudly."""
+    md = os.path.join(tmp, "metadata")
+    for sub, name in (("ortho", "ORTHO.tif"), ("mns", "MNS.tif"),
+                      ("mnt", "MNT.tif")):
+        os.makedirs(os.path.join(md, sub))
+        with open(os.path.join(md, sub, name), "wb") as f:
+            f.write(b"not-a-tiff-but-nonempty")
+    # a stale streamed tile from a previous mode must be cleared
+    open(os.path.join(md, "mns", "MNS_dalle_3_4.tif"), "w").close()
+    open(os.path.join(md, "EPSG.txt"), "w").write("25830\n")
+    open(os.path.join(md, "bbox.txt"), "w").write("1\n1\n2\n2\n")
+    env = dict(os.environ, https_proxy="http://127.0.0.1:1",
+               http_proxy="http://127.0.0.1:1")
+    r = subprocess.run([sys.executable,
+                        os.path.join(SCRIPTS, "download_ortho_MNS_spain.py"),
+                        "--metadata", md],
+                       capture_output=True, text=True, env=env, timeout=60)
+    out = r.stdout + r.stderr
+    check("supplied: module exits 0 without network", r.returncode == 0,
+          out[-150:])
+    kept = all(os.path.exists(os.path.join(md, s, n))
+               for s, n in (("ortho", "ORTHO.tif"), ("mns", "MNS.tif")))
+    check("supplied: shipped rasters survive the purge", kept)
+    check("supplied: stale tiles cleared",
+          not os.path.exists(os.path.join(md, "mns", "MNS_dalle_3_4.tif")))
+    check("supplied: stream skipped (printed)",
+          "stream skipped" in out)
+
+
 def main():
     import tempfile
     print("HistCat fork preflight (L2)")
     test_equations()
     with tempfile.TemporaryDirectory() as tmp:
         test_auto_mask(tmp)
+    with tempfile.TemporaryDirectory() as tmp:
+        test_supplied(tmp)
     test_static_markers()
     if "--network" in sys.argv:
         test_network()

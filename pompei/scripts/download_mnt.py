@@ -94,15 +94,17 @@ if args.ortho == "storeref" and EPSG==2154:
     commande = "gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"), os.path.join("metadata", "mnt", "*.tif"))
     os.system(commande)
 elif args.ortho == "spain":
-    # HistCat: IGN-E WCS terrain, 2 km margin over the chantier bbox.
-    # mnt/ is owned by spain mode: clear leftovers from other modes first.
-    from download_ortho_MNS_spain import fetch_terrain
-    import glob as _g
+    # HistCat: production path is a metadata/mnt/MNT.tif supplied with the
+    # chantier (staging `prefetch`, national MDT05 masters, +12 km over the
+    # footprints — the final drape projects corner rays ~8 km past them).
+    # Blind to origin: file in place -> only build the vrt. Otherwise fall
+    # back to the IGN-E WCS stream, with the same 12 km margin.
+    from download_ortho_MNS_spain import fetch_terrain, _supplied, _clear_except
     os.makedirs(os.path.join("metadata", "mnt"), exist_ok=True)
-    for f in (_g.glob(os.path.join("metadata", "mnt", "*.tif"))
-              + _g.glob(os.path.join("metadata", "mnt", "*.vrt"))):
-        os.remove(f)
-    fetch_terrain(bbox, "metadata", subdir="mnt", prefix="MNT", margin=2000.0)
+    if not _supplied(os.path.join("metadata", "mnt", "MNT.tif")):
+        _clear_except(os.path.join("metadata", "mnt"), set())
+        fetch_terrain(bbox, "metadata", subdir="mnt", prefix="MNT",
+                      margin=12000.0)
     os.system("gdalbuildvrt {} {}".format(os.path.join("metadata", "mnt", "mnt.vrt"),
                                           os.path.join("metadata", "mnt", "*.tif")))
 elif os.path.exists(os.path.join("metadata", "mnt", "mnt.vrt")):
