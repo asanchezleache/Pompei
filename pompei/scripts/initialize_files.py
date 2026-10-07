@@ -117,7 +117,9 @@ def get_pattern_OIS(images):
     return f"({images_str})"
 
 
-def createLocalChantierDescripteur(scripts_path, sensors):
+def createLocalChantierDescripteur(scripts_path, sensors, per_image_masks=False):
+    # HistCat: per_image_masks maps each frame to its own mask filtre_<frame>.tif (auto_mask_pompei.py --per-image),
+    # used in zero-fiducial mode where the photo sits differently in each scan; else one mask per camera as before.
     tree = etree.parse(os.path.join(scripts_path, "MicMac-LocalChantierDescripteur.xml"))
     root = tree.getroot()
 
@@ -163,7 +165,7 @@ def createLocalChantierDescripteur(scripts_path, sensors):
         patternTransform = etree.SubElement(direct, "PatternTransform")
         patternTransform.text = get_pattern_OIS(images)
         calcName = etree.SubElement(direct, "CalcName")
-        calcName.text = f"filtre{identifiant}.tif"
+        calcName.text = "filtre_$1" if per_image_masks else f"filtre{identifiant}.tif"
 
 
 
@@ -203,7 +205,7 @@ def case_0_fiduciaux(cliches, remove_artefacts):
         f.write("python ${scripts_dir}/maj_calibNum.py "+f"--identifiant 0 --ta {TA_path} >> logfile \n\n")
         f.write("#Saisie du masque pour supprimer les contours \n")
         f.write("echo \"Saisie du masque pour supprimer les contours\" \n")
-        f.write("python ${scripts_dir}/auto_mask_pompei.py filtre0.tif >> logfile\n")
+        f.write("python ${scripts_dir}/auto_mask_pompei.py --per-image filtre0.tif >> logfile\n")
         if remove_artefacts:
             f.write("echo \"Saisie du masque pour supprimer les contours et les artefacts\"\n ")
             f.write("mm3d SaisieMasq OIS-Reech_{}.tif Name=filtre_artefacts.tif Gama=2 >> logfile\n".format(name_first_image))
@@ -215,6 +217,8 @@ def case_0_fiduciaux(cliches, remove_artefacts):
         f.write("#Conversion des orientations et positions des sommets de prise de vue contenue dans le fichier csv dans le format MicMac \n")
         f.write("echo \"OriConvert\" \n")
         f.write("mm3d OriConvert OriTxtInFile SommetsNav.csv Nav NameCple=CouplesTA.xml >> logfile \n\n")
+        f.write("# HistCat: ne garder que les couples dont les emprises se recouvrent vraiment\n")
+        f.write("python ${scripts_dir}/pair_filter.py --couples CouplesTA.xml --footprints flight_plan/flight_plan.shp | tee -a logfile \n\n")
         f.write("# Recherche des points homologues \n")
         f.write("echo \"Tapioca\" \n")
         f.write("mm3d Tapioca File CouplesTA.xml 5000 > reports/rapport_Tapioca.txt 2>&1 \n\n")
@@ -296,6 +300,8 @@ def case_n_fiduciaux(remove_artefacts, sensors, targets, nb_fiducial_marks, appl
         f.write("#Conversion des orientations et positions des sommets de prise de vue contenue dans le fichier csv dans le format MicMac \n")
         f.write("echo \"OriConvert\" \n")
         f.write("mm3d OriConvert OriTxtInFile SommetsNav.csv Nav NameCple=CouplesTA.xml >> logfile \n\n")
+        f.write("# HistCat: ne garder que les couples dont les emprises se recouvrent vraiment\n")
+        f.write("python ${scripts_dir}/pair_filter.py --couples CouplesTA.xml --footprints flight_plan/flight_plan.shp | tee -a logfile \n\n")
         f.write("# Recherche des points homologues \n")
         f.write("echo \"Tapioca\" \n")
         f.write("mm3d Tapioca File CouplesTA.xml 5000 5000 > reports/rapport_Tapioca.txt 2>&1 \n\n")
@@ -310,7 +316,7 @@ root = openXml(TA_path)
 sensors = getSensors(root)
 logger.info(f"Il y a {len(sensors)} caméras dans le chantier")
 createOriCalibNum(scripts_path, sensors)
-createLocalChantierDescripteur(scripts_path, sensors)
+createLocalChantierDescripteur(scripts_path, sensors, per_image_masks=(nb_fiducial_marks == 0))
 cliches = createSommetsNav(root)
 
 if nb_fiducial_marks == 0:

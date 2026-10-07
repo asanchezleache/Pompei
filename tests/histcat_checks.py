@@ -78,10 +78,105 @@ def test_auto_mask(tmp):
               (d.compression or "NONE") in ("NONE", None), str(d.compression))
 
 
+def _scan_with_data_strip(path, transform):
+    """Synthetic 1100 x 1200 scan: black surround, textured photo square rows/cols 150-950, and a data strip
+    (dark film, two bright dials) attached on the right, cols 950-1150 -- the madrid_0559_00L case."""
+    import numpy as np, rasterio
+    rng = np.random.default_rng(0)
+    a = np.zeros((1100, 1200), np.uint8)
+    a[150:950, 150:950] = rng.integers(90, 210, (800, 800))
+    a[150:950, 950:1150] = 40
+    a[300:340, 1040:1080] = 220
+    a[700:740, 1040:1080] = 220
+    with rasterio.open(path, "w", driver="GTiff", dtype="uint8", width=1200, height=1100, count=1,
+                       crs="EPSG:25830", transform=transform) as d:
+        d.write(a, indexes=1)
+
+
+def test_photo_frame(tmp):
+    """photo_frame: the data strip is cut (square trim) and the photo box maps to the right ground footprint."""
+    import shutil
+    import rasterio
+    sys.path.insert(0, SCRIPTS)
+    import photo_frame
+    img = os.path.join(tmp, "scan_strip.tif")
+    tf = rasterio.Affine(0.5, 0, 1000.0, 0, -0.5, 5000.0)      # 0.5 m pixels, north-up
+    _scan_with_data_strip(img, tf)
+    pts, det = photo_frame.footprint(img)
+    c0, r0, c1, r1 = det["bbox"]
+    check("photo_frame: data strip cut on the right", det["trimmed"] == "right", str(det["trimmed"]))
+    check("photo_frame: photo box ~ cols 150-950, rows 150-950 (strip excluded)",
+          abs(c0 - 150) <= 16 and abs(r0 - 150) <= 16 and abs(r1 - 950) <= 16 and 900 <= c1 <= 960,
+          str(det["bbox"]))
+    ll, ur = pts[0], pts[4]
+    check("photo_frame: footprint in ground coordinates (8 points, LL/UR)",
+          len(pts) == 8 and abs(ll[0] - 1075) <= 10 and abs(ll[1] - 4525) <= 10
+          and abs(ur[1] - 4925) <= 10 and ur[0] < 1000 + 960 * 0.5 + 1, f"LL {ll} UR {ur}")
+    # per-image masks, as initialize_files.py now calls the script
+    work = os.path.join(tmp, "perimage")
+    os.makedirs(work)
+    for n in ("OIS-Reech_a.tif", "OIS-Reech_b.tif"):
+        shutil.copy(img, os.path.join(work, n))
+    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "auto_mask_pompei.py"), "--per-image", "filtre0.tif"],
+                       capture_output=True, text=True, cwd=work)
+    made = all(os.path.exists(os.path.join(work, f)) for f in
+               ("filtre0.tif", "filtre_OIS-Reech_a.tif", "filtre_OIS-Reech_b.tif"))
+    check("auto_mask: --per-image writes filtre0 + one mask per frame", r.returncode == 0 and made,
+          (r.stderr or "")[-120:])
+    if made:
+        with rasterio.open(os.path.join(work, "filtre_OIS-Reech_a.tif")) as d:
+            m = d.read(1)
+        check("auto_mask: data strip and margin excluded, photo kept",
+              m[550, 550] == 255 and m[320, 1060] == 0 and m[550, 152] == 0)
+
+
+def test_pair_filter(tmp):
+    """A pair counts only with a real footprint overlap (>= 10 % of the smaller), before Tapioca and after."""
+    import geopandas as gpd
+    from shapely.geometry import box
+    sys.path.insert(0, SCRIPTS)
+    import pair_filter
+    fp = {"A": box(0, 0, 10, 10), "B": box(6, 0, 16, 10), "C": box(9.9, 0, 19.9, 10)}
+    check("pair_filter: 40 % overlap kept, 1 % sliver dropped",
+          pair_filter.overlapping("A", "B", fp, 0.1) and not pair_filter.overlapping("A", "C", fp, 0.1))
+    os.makedirs(os.path.join(tmp, "flight_plan"))
+    shp = os.path.join(tmp, "flight_plan", "flight_plan.shp")
+    gpd.GeoDataFrame({"nom": list(fp)}, geometry=list(fp.values()), crs="EPSG:25830").to_file(shp)
+    couples = os.path.join(tmp, "CouplesTA.xml")
+    with open(couples, "w") as f:
+        f.write('<?xml version="1.0" ?>\n<SauvegardeNamedRel>\n'
+                '<Cple>OIS-Reech_A.tif OIS-Reech_B.tif</Cple>\n<Cple>OIS-Reech_A.tif OIS-Reech_C.tif</Cple>\n'
+                '<Cple>OIS-Reech_B.tif OIS-Reech_C.tif</Cple>\n</SauvegardeNamedRel>\n')
+    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "pair_filter.py"), "--couples", couples,
+                        "--footprints", shp], capture_output=True, text=True)
+    txt = open(couples).read()
+    check("pair_filter: CouplesTA.xml keeps A-B and B-C, drops A-C",
+          r.returncode == 0 and "OIS-Reech_A.tif OIS-Reech_B.tif" in txt and "OIS-Reech_B.tif OIS-Reech_C.tif" in txt
+          and "OIS-Reech_A.tif OIS-Reech_C.tif" not in txt, (r.stdout + r.stderr)[-120:])
+    # delete_tie_points.py on the same footprints
+    hin = os.path.join(tmp, "HomolMasqFiltered")
+    for a, b in (("A", "B"), ("A", "C"), ("B", "C")):
+        os.makedirs(os.path.join(hin, f"PastisOIS-Reech_{a}.tif"), exist_ok=True)
+        open(os.path.join(hin, f"PastisOIS-Reech_{a}.tif", f"OIS-Reech_{b}.tif.dat"), "w").write("x")
+    hout = os.path.join(tmp, "Homol")
+    r = subprocess.run([sys.executable, os.path.join(SCRIPTS, "delete_tie_points.py"), "--homol_input", hin,
+                        "--homol_output", hout, "--footprints", shp], capture_output=True, text=True)
+    kept = sorted(os.path.relpath(os.path.join(d, f), hout) for d, _, fs in os.walk(hout) for f in fs)
+    check("delete_tie_points: keeps A-B and B-C, drops the A-C sliver",
+          r.returncode == 0 and len(kept) == 2
+          and os.path.join("PastisOIS-Reech_A.tif", "OIS-Reech_C.tif.dat") not in kept,
+          f"{kept} {(r.stderr or '')[-80:]}")
+
+
 def test_static_markers():
     """Source-level presence of each structural patch."""
     ini = src("initialize_files.py")
     check("initialize_files: auto-mask wired", "auto_mask_pompei.py" in ini)
+    check("initialize_files: per-image masks (0-fiducial) + MyKeyCalculMasq per frame",
+          "auto_mask_pompei.py --per-image" in ini and '"filtre_$1"' in ini)
+    check("initialize_files: CouplesTA filtered by footprint overlap before Tapioca", "pair_filter.py" in ini)
+    check("create_mask_per_image: per-frame mask preferred for Malt",
+          "filtre_OIS-Reech_" in src("create_mask_per_image.py"))
     check("initialize_files: tee pipe removed from Tapioca",
           "| tee reports/rapport_Tapioca.txt" not in ini
           and "> reports/rapport_Tapioca.txt" in ini)
@@ -189,6 +284,10 @@ def main():
         test_auto_mask(tmp)
     with tempfile.TemporaryDirectory() as tmp:
         test_supplied(tmp)
+    with tempfile.TemporaryDirectory() as tmp:
+        test_photo_frame(tmp)
+    with tempfile.TemporaryDirectory() as tmp:
+        test_pair_filter(tmp)
     test_static_markers()
     if "--network" in sys.argv:
         test_network()

@@ -33,8 +33,12 @@ for sensor_dict in sensors:
     identifiant = sensor_dict["identifiant"]
     images = sensor_dict["images"]
     filtre_name = f"filtre{identifiant}.tif"
-    if os.path.isfile(filtre_name):
-        for image in images:
-            filtre_image_name = image[:-4]
-            filtre_image_name = f"OIS-Reech_{filtre_image_name}_Masq.tif"
+    for image in images:
+        filtre_image_name = image[:-4]
+        filtre_image_name = f"OIS-Reech_{filtre_image_name}_Masq.tif"
+        # HistCat: the frame's own mask (auto_mask_pompei.py --per-image) when there is one, else the camera's
+        per_image = f"filtre_OIS-Reech_{image}"
+        if os.path.isfile(per_image):
+            shutil.copy(per_image, filtre_image_name)
+        elif os.path.isfile(filtre_name):
             shutil.copy(filtre_name, filtre_image_name)
