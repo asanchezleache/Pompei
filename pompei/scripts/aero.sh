@@ -34,7 +34,7 @@ python ${scripts_dir}/add_GCP.py --appuis_BDOrtho_existants pts_bdortho.txt --ap
 # the anchors keep the coarse pass's residual; refine_GCP.py re-measures them sub-pixel against the reference ortho
 REF=../metadata/ortho_temp/ORTHO.tif
 if [ ! -f ${REF} ]; then gdalbuildvrt -q refine_ref.vrt ../metadata/ortho/ORTHO_dalle_*.tif; REF=refine_ref.vrt; fi
-python ${scripts_dir}/refine_GCP.py --bdortho pts_bdortho.txt --histo pts_orthomicmac_abs.txt --ref ${REF} --trial_dir ../Ortho-MEC-Malt-Abs-Ratafia --epsg ${EPSG} --step 2000 --report ../reports/refine_GCP_report.txt >> ../logfile 2>&1
+python ${scripts_dir}/refine_GCP.py --bdortho pts_bdortho.txt --histo pts_orthomicmac_abs.txt --ref ${REF} --trial_dir ../Ortho-MEC-Malt-Abs-Ratafia --epsg ${EPSG} --step 1000 --report ../reports/refine_GCP_report.txt >> ../logfile 2>&1
 
 #On aborde maintenant la partie avec MNS...
 ls ../metadata/mns/*.HDR ../metadata/mns/*.hdr > liste_mns_bdortho.txt
