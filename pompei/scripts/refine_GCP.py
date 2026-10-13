@@ -10,13 +10,6 @@ reference on gradient magnitude (sub-pixel, upsample 10); the residual offsets o
 form a correction field, interpolated (inverse distance, K nearest windows) to every pair, and the trial-side
 coordinates are corrected: histo += e. Without enough reliable windows nothing is changed.
 
-v2 (2026-10-10, problem 20 of the ledger: Barcelona 1, Zamora 4, Valladolid 6 reliable windows at step 2000 / 30 pairs,
-so their pairs stayed unchanged): denser default grid (step 1000 m, >= 10 pairs per window; on Zaragoza 229 windows
-instead of 37, same correction); windows farther than 3 robust sigmas (min 1 m) from the median correction are dropped;
-with fewer than FIELD_MIN reliable windows ONE uniform correction (their median) is applied instead of the field
-(offline, Barcelona's 5 windows at step 500 gave a median of +0.6 / +0.1 m but an IDW field with a mean of -0.5 / +4.5 m:
-a few windows cannot carry a field).
-
 Coordinates follow the chain's conventions: the trial tiles' .tfw are read as the pixel CORNER (as Pompei writes its
 own tfw and as convert_ori tfw2ori expects; the synthetic test is exact with that), the reference through its GeoTIFF.
 
@@ -27,7 +20,6 @@ import argparse
 import glob
 import os
 import shutil
-import tempfile
 
 import numpy as np
 import rasterio
@@ -87,18 +79,14 @@ def main():
     ap.add_argument("--epsg", type=int, required=True)
     ap.add_argument("--win", type=float, default=400.0)
     ap.add_argument("--step", type=float, default=1000.0)
-    ap.add_argument("--min_pairs", type=int, default=10)
+    ap.add_argument("--min_pairs", type=int, default=30)
     ap.add_argument("--min_ncc", type=float, default=0.2)
     ap.add_argument("--min_windows", type=int, default=5)
-    ap.add_argument("--field_min", type=int, default=20, help="fewer reliable windows: one uniform correction")
     ap.add_argument("--k", type=int, default=6)
     ap.add_argument("--report", default="refine_GCP_report.txt")
     a = ap.parse_args()
     crs = CRS.from_epsg(a.epsg)
-    tmp = tempfile.mkdtemp(prefix="refine_GCP_")        # own folder: two jobs can share a node's /tmp
-    import atexit
-    atexit.register(shutil.rmtree, tmp, True)
-    trial = trial_vrt(a.trial_dir, os.path.join(tmp, "trial.vrt"))
+    trial = trial_vrt(a.trial_dir, "/tmp/refine_trial.vrt")
     bd = np.loadtxt(a.bdortho, ndmin=2)
     om = np.loadtxt(a.histo, ndmin=2)
     d = om - bd
@@ -119,33 +107,22 @@ def main():
             ex, ey, q = shift(t, r)
             if q >= a.min_ncc and abs(ex) < a.win / 4 and abs(ey) < a.win / 4:
                 win.append((cx, cy, ex, ey, q))
-    w = np.array(win).reshape(-1, 5)
-    if len(w) >= a.min_windows:
-        # outlier windows (real change, repetitive texture): radial distance from the median correction > 3 robust sigmas
-        dev = np.hypot(w[:, 2] - np.median(w[:, 2]), w[:, 3] - np.median(w[:, 3]))
-        cut = max(1.0, 3 * 1.4826 * np.median(dev))
-        n0, w = len(w), w[dev <= cut]
-        lines.append(f"{n0} reliable windows, {n0 - len(w)} dropped as outliers (> {cut:.2f} m from the median)")
+    w = np.array(win)
     if len(w) < a.min_windows:
         lines.append(f"only {len(w)} reliable windows (< {a.min_windows}): pairs left unchanged")
         open(a.report, "w").write("\n".join(lines) + "\n")
         print("\n".join(lines))
         return
-    lines.append(f"{len(w)} windows used: correction median dx {np.median(w[:, 2]):+.3f} dy {np.median(w[:, 3]):+.3f}"
+    lines.append(f"{len(w)} reliable windows: correction median dx {np.median(w[:, 2]):+.3f} dy {np.median(w[:, 3]):+.3f}"
                  f" m, IQR dx {np.subtract(*np.percentile(w[:, 2], [75, 25])):.2f} dy "
                  f"{np.subtract(*np.percentile(w[:, 3], [75, 25])):.2f}")
-    if len(w) < a.field_min:
-        # too few windows for a field: one uniform correction, their median
-        e = np.tile([np.median(w[:, 2]), np.median(w[:, 3])], (len(bd), 1))
-        lines.append(f"fewer than {a.field_min} windows: uniform correction")
-    else:
-        # inverse-distance field over the K nearest reliable windows (KD-tree: hundreds of windows x 1e5 pairs)
-        from scipy.spatial import cKDTree
-        k = min(a.k, len(w))
-        dk, idx = cKDTree(w[:, :2]).query(bd[:, :2], k=k)
-        dk, idx = dk.reshape(len(bd), k) + 1.0, idx.reshape(len(bd), k)
-        wt = 1.0 / dk ** 2
-        e = np.stack([(wt * w[idx, 2]).sum(1) / wt.sum(1), (wt * w[idx, 3]).sum(1) / wt.sum(1)], axis=1)
+    # inverse-distance field over the K nearest reliable windows
+    dist = np.hypot(bd[:, None, 0] - w[None, :, 0], bd[:, None, 1] - w[None, :, 1])
+    k = min(a.k, len(w))
+    idx = np.argsort(dist, axis=1)[:, :k]
+    dk = np.take_along_axis(dist, idx, axis=1) + 1.0
+    wt = 1.0 / dk ** 2
+    e = np.stack([(wt * w[idx, 2]).sum(1) / wt.sum(1), (wt * w[idx, 3]).sum(1) / wt.sum(1)], axis=1)
     shutil.copy(a.histo, a.histo + ".orig")
     np.savetxt(a.histo, om + e, fmt="%.3f")
     lines.append(f"pairs corrected: mean correction {e.mean(axis=0).round(3)} m; trial minus reference now median "
