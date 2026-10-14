@@ -577,8 +577,36 @@ with Pool(processes=nb_cpus) as pool:
 emprise_lines = polygon_to_linestring(emprise)
 # On rend la géométrie valide
 lignes_optimisees = list(make_valid(lignes_optimisees))
+# HistCat (2026-10-15): the optimised path is searched on a grid that reaches past the bbox, so a seamline can leave
+# the chantier near its end (Valladolid: 3 of 108, 3-12 m) or run along its outline. (1) A seamline leaving the bbox
+# crosses the outline where it has no vertex, the linework is not noded there, and polygonize_full below then returns
+# no polygon for the two photos it separates (holes in the final ortho): such seamlines are clipped to the bbox.
+# (2) A seamline part lying ON the outline makes split() fail ("Input geometry segment overlaps with the splitter"):
+# such parts are removed (the seamline still touches the outline where they end). Seamlines inside the bbox and off its
+# outline are left as they are: for them nothing changes.
+contour = MultiLineString(emprise_lines)
+
+
+def _lignes(g):
+    """LineString or MultiLineString of the line parts of g (drops the points a clip or a difference can leave)."""
+    parts = [p for p in getattr(g, "geoms", [g]) if p.geom_type == "LineString" and not p.is_empty]
+    return parts[0] if len(parts) == 1 else MultiLineString(parts)
+
+
+for k, ligne in enumerate(lignes_optimisees):
+    if not emprise.covers(ligne):
+        dehors = ligne.difference(emprise).length
+        lignes_optimisees[k] = ligne = _lignes(ligne.intersection(emprise))
+        logger.warning(f"mosaiquage: seamline {shot1[k]} / {shot2[k]}: {dehors:.2f} m outside the chantier clipped")
+        print(f"HISTCAT CLIP: seamline {shot1[k]} / {shot2[k]}: {dehors:.2f} m outside the chantier clipped")
+    sur_contour = ligne.intersection(contour).length
+    if sur_contour > 0:
+        lignes_optimisees[k] = _lignes(ligne.difference(contour))
+        logger.warning(f"mosaiquage guard: seamline {shot1[k]} / {shot2[k]}: {sur_contour:.2f} m on the outline removed")
+        print(f"HISTCAT GUARD: seamline {shot1[k]} / {shot2[k]}: {sur_contour:.2f} m on the outline removed")
+lignes_coupe = [p for ligne in lignes_optimisees for p in getattr(ligne, "geoms", [ligne])]
 # On divise les lignes de l'emprise pour qu'on ait un tronçon entre deux lignes de mosaïquages
-emprise_lines = list(split(MultiLineString(emprise_lines), MultiLineString(lignes_optimisees)).geoms)
+emprise_lines = list(split(MultiLineString(emprise_lines), MultiLineString(lignes_coupe)).geoms)
 
 
 # On dispose de lignes de mosaïquages et des lignes délimitant le contour
