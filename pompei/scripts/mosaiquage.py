@@ -17,7 +17,7 @@ from multiprocessing import Pool
 from tools import load_bbox, getResolution, getEPSG, read_ori
 import logging
 from tqdm import tqdm
-from shapely import Point, voronoi_polygons, MultiPoint, Polygon, LineString, intersection, MultiLineString, polygonize_full, make_valid, difference, within
+from shapely import Point, voronoi_polygons, MultiPoint, Polygon, LineString, intersection, MultiLineString, polygonize_full, make_valid, difference, within, unary_union
 from shapely.geometry import box
 from shapely.ops import split
 import geopandas as gpd
@@ -642,3 +642,17 @@ for shot in shots:
         shot_names.append(shot.imagePath)
 
 gpd.GeoDataFrame({"shot":shot_names, "geometry":polygones}).set_crs(epsg=EPSG).to_file(mosaic_path)
+
+# HistCat (2026-10-15): layout check, written to the log and printed. A photo without a polygon leaves its area black
+# (before the clip and the guard: Valladolid 6 photos, Palma 10); the chantier area without a polygon and the area
+# claimed by two photos should be about 0.
+valides = [make_valid(p) for p in polygones]
+union = unary_union(valides)
+sans_polygone = sorted({shot.imagePath for shot in shots} - set(shot_names))
+non_couvert = emprise.difference(union).area / 1e6
+double = (sum(p.area for p in valides) - union.area) / 1e6
+message = (f"mosaic layout: {len(polygones)} polygons for {len(set(shot_names))} of {len(shots)} photos; photos without "
+           f"a polygon: {', '.join(sans_polygone) if sans_polygone else 'none'}; chantier area without a polygon "
+           f"{non_couvert:.3f} km2; area claimed by two photos {double:.3f} km2")
+logger.info(message)
+print(f"HISTCAT LAYOUT: {message}")

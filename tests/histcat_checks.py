@@ -197,6 +197,11 @@ def test_static_markers():
     mos = src("mosaiquage.py")
     check("mosaiquage: collinear + metadata EPSG",
           "hasattr(lines" in mos and "getEPSG(metadata)" in mos)
+    check("mosaiquage: seamlines clipped to the chantier + outline guard + layout check",
+          "HISTCAT CLIP" in mos and "HISTCAT GUARD" in mos and "HISTCAT LAYOUT" in mos)
+    big = src("create_big_Ortho.py")
+    check("create_big_Ortho: polygons burnt as i+1, empty pixels filled, full read window",
+          "compte + 1" in big and "HISTCAT FILL" in big and "min(inputds.RasterXSize, max_c)" in big)
     check("spain: module present", os.path.exists(os.path.join(SCRIPTS, "download_ortho_MNS_spain.py")))
     check("spain: wired in download_ortho_MNS.sh", '"spain"' in src("download_ortho_MNS.sh"))
     check("spain: wired in download_mnt.py", '"spain"' in src("download_mnt.py"))
