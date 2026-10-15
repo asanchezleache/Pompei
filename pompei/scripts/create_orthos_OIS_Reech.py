@@ -14,6 +14,7 @@ You should have received a copy of the GNU General Public License along with Pom
 """
 
 import os
+import json
 import argparse
 
 import rasterio.crs
@@ -25,6 +26,7 @@ from multiprocessing import Pool, Process
 from tqdm import tqdm
 from tools import getEPSG, load_bbox, getNbCouleurs, getResolution, read_ori
 import log # Chargement des configurations des logs
+import photo_frame  # HistCat: photo-frame detection (cadre_photo)
 import logging
 
 logger = logging.getLogger()
@@ -48,6 +50,12 @@ ta_path = args.ta
 
 # Une dalle : 2000 pixels
 tileSize = 2000
+
+# HistCat (2026-10-15): photo-frame mask of each resampled scan (cadre_photo)
+CADRE_ITERATIONS = 2      # erosion of the detected photo: 2 x photo_frame.STEP = 16 scan px (~6.5 m at 0.41 m)
+CADRE_MIN_PART = 0.5      # a detected photo under half of the image is not trusted
+array_cadre = None
+cadres = {}               # photo -> share of the image kept, None if projected whole; written to HISTCAT_cadre.json
   
 
 def saveImage(image, path, x0, y0, resolution, EPSG, create_ori=False):
@@ -127,15 +135,25 @@ def createOrthoImage(shot:Shot, x_min, x_max, y_min, y_max, mnt:MNT, resolution,
         
         finalImage = np.zeros((nbCouleurs, max_l-min_l+1, max_c-min_c+1), dtype=np.uint8)
         finalImage[:,min_l_read-min_l:max_l_read-min_l+1, min_c_read-min_c:max_c_read-min_c+1] = image
+        # HistCat (2026-10-15): the same window of the photo-frame mask (see cadre_photo)
+        if array_cadre is not None:
+            cadre = np.zeros((max_l-min_l+1, max_c-min_c+1), dtype=np.uint8)
+            cadre[min_l_read-min_l:max_l_read-min_l+1, min_c_read-min_c:max_c_read-min_c+1] = \
+                array_cadre[min_l_read:max_l_read+1, min_c_read:max_c_read+1]
 
     # On récupère les points de l'image
     if finalImage is not None:
+        if array_cadre is not None:
+            # HistCat: 1 where the pixel's position in the resampled scan lies inside the photo, else 0 (nearest)
+            dans_cadre = ndimage.map_coordinates(cadre, np.vstack([l_corr-min_l, c_corr-min_c]), order=0).reshape((1, y.shape[0], x.shape[0]))
         list_bands = []
         for i in range(nbCouleurs):
             value_band = ndimage.map_coordinates(finalImage[i,:,], np.vstack([l_corr-min_l, c_corr-min_c])).reshape((1, y.shape[0], x.shape[0]))
             # On applique le masque
             if mask_path is not None:
                 value_band = value_band*mask_value
+            if array_cadre is not None:
+                value_band = value_band*dans_cadre
             list_bands.append(value_band)
         ortho = np.concatenate(list_bands, axis=0)
     else:
@@ -200,9 +218,32 @@ def write_image(bigOrtho, path_ortho, x_min, y_max, resolution, EPSG, bigMask, p
     saveImage(bigMask, path_mask, x_min, y_max, resolution, EPSG, create_ori=True)
 
 
+def cadre_photo(image, nom):
+    """
+    HistCat (2026-10-15): mask (1 = photo) of a resampled scan. The OIS-Reech image holds the photo plus ~20 % of
+    scanner surround (black film, holder edges, dust, hairs: grey 1-30, not 0; Elche: the per-image masks keep 72.6-78 %).
+    Projected as it was, that surround went into the per-photo orthos and from them into the mosaic wherever a polygon
+    reaches past its photo (chantier edges). The photo is found by photo_frame.detect, the same detection as the
+    per-image masks of auto_mask_pompei.py (tie points, Malt), here eroded by CADRE_ITERATIONS x photo_frame.STEP scan
+    pixels only. If the detected photo is under CADRE_MIN_PART of the image, the detection is not trusted and the image
+    is projected whole, as before.
+    """
+    det = photo_frame.detect(image[:, ::photo_frame.STEP, ::photo_frame.STEP])
+    c0, r0, c1, r1 = det["bbox"]
+    marge = CADRE_ITERATIONS * photo_frame.STEP / max(1, min(c1 - c0, r1 - r0))
+    cadre = (photo_frame.mask(det, image.shape[1:], margin=marge) > 0).astype(np.uint8)
+    part = float(cadre.mean())
+    if part < CADRE_MIN_PART:
+        logger.warning(f"{nom}: photo frame not found ({100 * part:.1f} % of the image), projected whole")
+        print(f"HISTCAT CADRE: {nom}: photo frame not found ({100 * part:.1f} % of the image), projected whole")
+        return None, part
+    print(f"HISTCAT CADRE: {nom}: {100 * part:.1f} % of the resampled image kept (photo frame)")
+    return cadre, part
+
+
 def createShotOrtho(shot, resolution, nbCouleurs, EPSG):
-    global array_ortho
-    
+    global array_ortho, array_cadre
+
     path_ortho = os.path.join(outdir, "Ort_{}.tif".format(shot.nom))
     path_mask = os.path.join(outdir, "Incid_{}.tif".format(shot.nom))
     x_min, x_max, y_min, y_max = getEmpriseSol(shot, mnt)
@@ -211,6 +252,8 @@ def createShotOrtho(shot, resolution, nbCouleurs, EPSG):
     if n is not None:
         inputds = rasterio.open(shot.imagePath)
         array_ortho = inputds.read()
+        array_cadre, part = cadre_photo(array_ortho, shot.nom)
+        cadres[shot.nom] = round(part, 4) if array_cadre is not None else None
         work_data = []
         for i in range(0, n, 1000):
             for j in range(0, m, 1000):
@@ -265,3 +308,8 @@ shots = read_ori(ori_path, ta_path, EPSG)
 
 # Crée les tuiles d'ortho
 createShotOrthos(shots, resolution, nbCouleurs, EPSG)
+
+# HistCat (2026-10-15): which orthos were cut to their photo frame. create_big_Ortho.py fills empty mosaic pixels from
+# other photos only when this file says that every ortho was (otherwise it would fill with scanner surround).
+with open(os.path.join(outdir, "HISTCAT_cadre.json"), "w") as f:
+    json.dump({"cadre_iterations": CADRE_ITERATIONS, "step": photo_frame.STEP, "kept": cadres}, f, indent=1)
