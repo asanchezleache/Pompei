@@ -14,6 +14,7 @@ You should have received a copy of the GNU General Public License along with Pom
 """
 
 import os
+import json
 import argparse
 from equations import MNT
 import numpy as np
@@ -73,11 +74,16 @@ def computeMosaic(x0, y0, shots):
             except:
                 geom = element[0]
             
-            mosaique_extraction.append([geom, compte])
+            # HistCat (2026-10-15): polygon i is burnt as i+1 and 0 means "no polygon". Before, the first photo was
+            # burnt as 0, the fill value, so every pixel outside all polygons took the first photo of the tile.
+            mosaique_extraction.append([geom, compte + 1])
             shots_filtered.append(shots[element[1]])
             compte += 1
 
-    mosaic = rasterio.features.rasterize(mosaique_extraction, out_shape=(2000,2000), transform=transform)
+    if not mosaique_extraction:
+        return np.zeros((2000, 2000), dtype=np.uint16), shots_filtered
+    mosaic = rasterio.features.rasterize(mosaique_extraction, out_shape=(2000,2000), transform=transform, fill=0,
+                                         dtype=np.uint16)
     return mosaic, shots_filtered
 
     
@@ -114,15 +120,14 @@ def getOrthoImage(shot, x0, y0, nbCouleurs, path_ortho):
     inputds = gdal.Open(path2)
 
     # Coordonnées pour lire une partie de l'image même si dans l'idéal on a besoin d'une partie en-dehors de l'image
+    # HistCat (2026-10-15): the read window ends at RasterXSize / RasterYSize (exclusive); with RasterXSize-1 the last
+    # column and the last row of every ortho were never read.
     min_c_read = max(0, min_c)
-    max_c_read = min(inputds.RasterXSize-1, max_c)
+    max_c_read = min(inputds.RasterXSize, max_c)
     min_l_read = max(0, min_l)
-    max_l_read = min(inputds.RasterYSize-1, max_l)
+    max_l_read = min(inputds.RasterYSize, max_l)
 
-    if min_l > inputds.RasterYSize or min_c > inputds.RasterXSize or max_l < 0 or max_c < 0:
-        return None
-
-    if max_c_read-min_c_read < 0 or max_l_read-min_l_read < 0:
+    if max_c_read-min_c_read <= 0 or max_l_read-min_l_read <= 0:
         return None
 
     image = inputds.ReadAsArray(min_c_read, min_l_read, max_c_read-min_c_read, max_l_read-min_l_read)
@@ -146,41 +151,60 @@ def get_path_ortho():
     return os.path.join(radiom, "ini", "corr")
 
 
-def createOrthoTile(mosaic, shotsFiltered, x0, y0, nbCouleurs, path_ortho):
-    orthosImages = []
-    # Pour chaque image, on crée une ortho
-    for shot in shotsFiltered:
-        orthoImage = getOrthoImage(shot, x0, y0, nbCouleurs, path_ortho)
-        orthosImages.append(orthoImage)
+def createOrthoTile(mosaic, shotsFiltered, x0, y0, nbCouleurs, path_ortho, shots):
+    """
+    HistCat (2026-10-15): each pixel takes the photo of its mosaic polygon, as before; a pixel of the chantier that is
+    still empty (its photo has no data there, or no polygon covers it) takes, among the photos that do have data there,
+    the one whose camera centre is nearest (least relief displacement). Only photos whose ortho was cut to the photo
+    frame lend pixels (remplissage, from HISTCAT_cadre.json): in an uncut ortho, "data" includes the scanner surround.
+    Pixels outside the chantier stay empty.
+    Before: a tile with a single polygon took that photo everywhere, even outside its polygon and the chantier; a photo
+    without data in the tile was replaced by another one over its whole polygon; empty pixels stayed black although
+    another photo covered them. Returns (tile or None, pixels filled from another photo, chantier pixels left empty).
+    """
+    orthoFinale = np.zeros((nbCouleurs, tileSize, tileSize), dtype=np.uint8)
+    lues = {}
+    for i, shot in enumerate(shotsFiltered):
+        if shot.nom not in lues:
+            lues[shot.nom] = getOrthoImage(shot, x0, y0, nbCouleurs, path_ortho)
+        orthoImage = lues[shot.nom]
+        if orthoImage is not None:
+            orthoFinale = np.where(mosaic == i + 1, orthoImage, orthoFinale)
 
-    # Si une des orthos est None, alors on la remplace par une autre
-    aNoneOrtho = []
-    aNotNoneortho = None
-    for i, o in enumerate(orthosImages):
-        if o is None:
-            aNoneOrtho.append(i)
-        else:
-            aNotNoneortho = o
-    
-    # S'il y a au moins une ortho None et une ortho qui n'est pas None
-    if len(aNoneOrtho) > 0 and aNotNoneortho is not None:
-        # On remplace les orthos None par une ortho qui n'est pas None
-        for i in aNoneOrtho:
-            orthosImages[i] = aNotNoneortho
-    # S'il n'y a que des orthos None, on renvoie None
-    elif len(aNoneOrtho) > 0 and aNotNoneortho is None:
-        return None
-
-    # S'il y a qu'une seule ortho, on la renvoie
-    if len(orthosImages) == 1:
-        return orthosImages[0]
-    elif len(orthosImages) >= 2:
-        # S'il y en a plusieurs, alors on utilise le graphe de mosaïquage pour faire la reconstruction
-        orthoFinale = np.zeros(orthosImages[0].shape)
-        for i in range(len(orthosImages)):
-            orthoFinale = np.where(mosaic==i, orthosImages[i], orthoFinale)
-        return orthoFinale
-    return None
+    # Pixels of the chantier (pixel centre inside the bbox) still empty
+    xs = x0 + (np.arange(tileSize) + 0.5) * resolution
+    ys = y0 - (np.arange(tileSize) + 0.5) * resolution
+    dans_chantier = ((ys >= bbox[1]) & (ys <= bbox[3]))[:, None] & ((xs >= bbox[0]) & (xs <= bbox[2]))[None, :]
+    rows, cols = np.nonzero(dans_chantier & ~orthoFinale.any(axis=0))
+    rempli = 0
+    if rows.size:
+        tuile = (x0, y0 - tileSize * resolution, x0 + tileSize * resolution, y0)
+        best = np.full(rows.size, np.inf)
+        source = np.full(rows.size, -1)
+        candidats = []
+        for shot in shots:
+            b = ortho_bounds.get(shot.nom)
+            if not remplissage.get(shot.nom) or b is None or b[0] >= tuile[2] or b[2] <= tuile[0] or b[1] >= tuile[3] or b[3] <= tuile[1]:
+                continue
+            if shot.nom not in lues:
+                lues[shot.nom] = getOrthoImage(shot, x0, y0, nbCouleurs, path_ortho)
+            orthoImage = lues[shot.nom]
+            if orthoImage is None:
+                continue
+            valide = orthoImage[:, rows, cols].any(axis=0)
+            d = (xs[cols] - shot.x_pos) ** 2 + (ys[rows] - shot.y_pos) ** 2
+            mieux = valide & (d < best)
+            best[mieux] = d[mieux]
+            source[mieux] = len(candidats)
+            candidats.append(orthoImage)
+        for k, orthoImage in enumerate(candidats):
+            sel = source == k
+            orthoFinale[:, rows[sel], cols[sel]] = orthoImage[:, rows[sel], cols[sel]]
+        rempli = int((source >= 0).sum())
+    vide = int(rows.size) - rempli
+    if not orthoFinale.any():
+        return None, rempli, vide
+    return orthoFinale, rempli, vide
 
 
 def createOrthoProcess(work_data):
@@ -193,13 +217,14 @@ def createOrthoProcess(work_data):
 
     # On calcule la mosaïque
     mosaic, shots_filtered = computeMosaic(x0, y0, shots)
-    
+
     # On crée l'ortho pour la tuile
-    ortho = createOrthoTile(mosaic, shots_filtered, x0, y0, nbCouleurs, path_ortho)
+    ortho, rempli, vide = createOrthoTile(mosaic, shots_filtered, x0, y0, nbCouleurs, path_ortho, shots)
     if ortho is not None:
         # On sauvegarde l'ortho
         saveImage(ortho, os.path.join(outdir, "{}_{}_ortho.tif".format(x0, y0)), x0, y0, EPSG)
-    
+    return rempli, vide
+
 
 
 def createTiles(bbox, shots, nbCouleurs, EPSG, path_ortho):
@@ -212,10 +237,45 @@ def createTiles(bbox, shots, nbCouleurs, EPSG, path_ortho):
             work_data.append([x0, y0, nbCouleurs, EPSG, path_ortho, shots])
     
     # On parallélise le traitement
+    rempli, vide = 0, 0
     with Pool(processes=nb_cpus) as pool:
         with tqdm(total=len(work_data), desc="Calcul de l'ortho") as pbar:
-            for i in pool.map(createOrthoProcess, work_data):
+            for r, v in pool.map(createOrthoProcess, work_data):
+                rempli += r
+                vide += v
                 pbar.update()
+    km2 = resolution * resolution / 1e6
+    surface = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) / 1e6
+    message = (f"chantier {surface:.1f} km2: {rempli * km2:.3f} km2 filled from the nearest photo with data "
+               f"({sum(remplissage.values())} of {len(remplissage)} photos may lend pixels: {raison_remplissage}), "
+               f"{vide * km2:.3f} km2 left empty")
+    logger.info(message)
+    print(f"HISTCAT FILL: {message}")
+
+
+def get_ortho_bounds(shots):
+    """HistCat (2026-10-15): (x_min, y_min, x_max, y_max) of each photo's ortho, None if it has no ortho."""
+    bounds = {}
+    for shot in shots:
+        ds = gdal.Open(os.path.join(outdir, "Ort_{}.tif".format(shot.nom)))
+        if ds is None:
+            bounds[shot.nom] = None
+            continue
+        gt = ds.GetGeoTransform()
+        bounds[shot.nom] = (gt[0], gt[3] + ds.RasterYSize * gt[5], gt[0] + ds.RasterXSize * gt[1], gt[3])
+    return bounds
+
+
+def get_remplissage(shots):
+    """HistCat (2026-10-15): photo -> may lend pixels to the fill, i.e. create_orthos_OIS_Reech.py cut its ortho to the
+    photo frame (HISTCAT_cadre.json in the orthos' folder); and why."""
+    path = os.path.join(outdir, "HISTCAT_cadre.json")
+    if not os.path.isfile(path):
+        return {shot.nom: False for shot in shots}, "orthos not cut to the photo frame (no HISTCAT_cadre.json), no fill"
+    with open(path) as f:
+        kept = json.load(f).get("kept", {})
+    ok = {shot.nom: kept.get(shot.nom) is not None for shot in shots}
+    return ok, f"orthos cut to the photo frame for {sum(ok.values())} photos"
 
 def read_mosaique(shots, mosaic_file):
     mosaique = []
@@ -247,6 +307,8 @@ mosaique = read_mosaique(shots, mosaic_file)
 # On récupère le réeprtoire où se trouvent les orthos pour chaque image
 # Si la correction radiométrique n'a pas fonctionné, alors on prend celles sans correction radiométrique
 path_ortho = get_path_ortho()
+ortho_bounds = get_ortho_bounds(shots)
+remplissage, raison_remplissage = get_remplissage(shots)
 
 # Crée les tuiles d'ortho
 createTiles(bbox, shots, nbCouleurs, EPSG, path_ortho)
