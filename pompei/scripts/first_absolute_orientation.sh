@@ -18,6 +18,12 @@ TA=$2
 
 
 
+if [ -f HISTCAT_tapas_staged.txt ]; then
+#HistCat (2026-10-20): chantier marked at staging (plain Tapas known to fail): staged Tapas only, no plain attempt
+echo "Tapas (HistCat: staged)"
+python ${scripts_dir}/analyze_Tapas.py --staged_first --input_report reports/report_Tapas.txt --scripts_dir ${scripts_dir} --ta ${TA}
+else
+
 #Pré-calcule de l'orientation relative
 echo "Martini"
 mm3d Martini "OIS-Reech_.*tif" OriCalib=CalibNum >> logfile
@@ -26,8 +32,9 @@ mm3d Martini "OIS-Reech_.*tif" OriCalib=CalibNum >> logfile
 echo "Tapas"
 mm3d Tapas FraserBasic "OIS-Reech_.*tif" InOri=MartiniCalibNum InCal=CalibNum Out=Rel @ExitOnWarn | tee reports/report_Tapas.txt >> logfile
 
-#Analyse de report_Tapas 
-python ${scripts_dir}/analyze_Tapas.py --input_report reports/report_Tapas.txt --scripts_dir ${scripts_dir}
+#Analyse de report_Tapas (HistCat: a fatal plain Tapas falls back to the staged Tapas there)
+python ${scripts_dir}/analyze_Tapas.py --input_report reports/report_Tapas.txt --scripts_dir ${scripts_dir} --ta ${TA}
+fi
 
 
 #Crée un nuage de points

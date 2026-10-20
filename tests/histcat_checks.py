@@ -202,6 +202,10 @@ def test_static_markers():
     big = src("create_big_Ortho.py")
     check("create_big_Ortho: polygons burnt as i+1, empty pixels filled, full read window",
           "compte + 1" in big and "HISTCAT FILL" in big and "min(inputds.RasterXSize, max_c)" in big)
+    tap, foa = src("analyze_Tapas.py"), src("first_absolute_orientation.sh")
+    check("analyze_Tapas: staged Tapas fallback (starting focal from the photos, focal fixed, then free)",
+          "HISTCAT_tapas_staged.txt" in tap and "LibFoc=0" in tap and "photo_frame.detect" in tap
+          and "HISTCAT_tapas_staged.txt" in foa and "--staged_first" in foa)
     check("spain: module present", os.path.exists(os.path.join(SCRIPTS, "download_ortho_MNS_spain.py")))
     check("spain: wired in download_ortho_MNS.sh", '"spain"' in src("download_ortho_MNS.sh"))
     check("spain: wired in download_mnt.py", '"spain"' in src("download_mnt.py"))
