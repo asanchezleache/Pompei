@@ -53,12 +53,16 @@ TAPAS_ETAPE2 = ("mm3d Tapas FraserBasic \"OIS-Reech_.*tif\" InOri=RelHC0 InCal=R
 
 
 def report_fatal(chemin_rapport):
-    """True if a Tapas report ends on a fatal error or a warning that @ExitOnWarn turned into an exit (or is missing)."""
+    """True if a Tapas run failed: its report ends on a fatal error, on a warning that @ExitOnWarn turned into an exit,
+    or with a NaN residual (San Sebastián, Palma: the plain run ended at "Residual = -nan" without a FATAL message, and
+    the loop then removed images), or is missing."""
     if not os.path.exists(chemin_rapport):
         return True
     with open(chemin_rapport, "r", errors="replace") as f:
         texte = f.read()
-    return "Sorry, the following FATAL ERROR happened" in texte or "Warn tape enter to continue" in texte
+    residus = [l for l in texte.splitlines() if "Residual =" in l]
+    return ("Sorry, the following FATAL ERROR happened" in texte or "Warn tape enter to continue" in texte
+            or bool(residus and "nan" in residus[-1].split("Residual =")[1].split(";")[0].lower()))
 
 
 def cameras_images(chemin_ta):
@@ -209,8 +213,9 @@ def find_problem(chemin_rapport, chemin_scripts):
     logger.info(line_residual)
     logger.info(line_worst)
 
-    # HistCat: a FATAL plain Tapas goes to the staged Tapas before any image is removed (see HISTCAT_STAGED)
-    if algo=="Tapas" and fatal_error and not os.path.exists(HISTCAT_STAGED):
+    # HistCat: a failed plain Tapas (FATAL, or ending at a NaN residual) goes to the staged Tapas before any image is
+    # removed (see HISTCAT_STAGED)
+    if algo=="Tapas" and report_fatal(chemin_rapport) and not os.path.exists(HISTCAT_STAGED):
         with open(HISTCAT_STAGED, "w") as f:
             f.write("staged Tapas after a fatal plain Tapas (fallback)\n")
         logger.warning("HISTCAT TAPAS: the plain Tapas failed: staged Tapas (starting focal from the photos, focal fixed, then free)")
