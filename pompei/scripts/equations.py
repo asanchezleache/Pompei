@@ -40,6 +40,7 @@ dict_EPSG = {
     25830:{"auth":25830, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM30N (Spain)
     25829:{"auth":25829, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM29N (Spain)
     25831:{"auth":25831, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM31N (Spain)
+    25828:{"auth":25828, "epsg_geoc": 4936, "epsg_geog": 4258}, # ETRS89 / UTM28N (Spain, Canary Islands; HistCat 2026-11-19)
     2154:{"auth": "IGNF:RGF93LAMB93", "epsg_geoc": 4374, "epsg_geog": 7084}    
 }
 
